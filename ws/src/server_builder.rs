@@ -5,7 +5,7 @@ use std::sync::Arc;
 use core;
 use server_utils;
 use server_utils::cors::Origin;
-use server_utils::hosts::{Host, DomainsValidation};
+use server_utils::hosts::DomainsValidation;
 use server_utils::reactor::UninitializedRemote;
 use ws;
 
@@ -15,25 +15,25 @@ use session;
 
 /// Signer startup error
 #[derive(Debug)]
-pub enum Error {
+pub enum ServerError {
 	/// Wrapped `std::io::Error`
-	Io(io::Error),
+	IoError(io::Error),
 	/// Other `ws-rs` error
 	WebSocket(ws::Error)
 }
 
-impl From<ws::Error> for Error {
+impl From<ws::Error> for ServerError {
 	fn from(err: ws::Error) -> Self {
 		match err.kind {
-			ws::ErrorKind::Io(e) => Error::Io(e),
-			_ => Error::WebSocket(err),
+			ws::ErrorKind::Io(e) => ServerError::IoError(e),
+			_ => ServerError::WebSocket(err),
 		}
 	}
 }
 
-impl From<io::Error> for Error {
+impl From<io::Error> for ServerError {
 	fn from(err: io::Error) -> Self {
-		Error::Io(err)
+		ServerError::IoError(err)
 	}
 }
 
@@ -42,7 +42,6 @@ pub struct ServerBuilder<M: core::Metadata, S: core::Middleware<M>> {
 	handler: Arc<core::MetaIoHandler<M, S>>,
 	meta_extractor: Arc<MetaExtractor<M>>,
 	allowed_origins: Option<Vec<Origin>>,
-	allowed_hosts: Option<Vec<Host>>,
 	request_middleware: Option<Arc<session::RequestMiddleware>>,
 	session_stats: Option<Arc<session::SessionStats>>,
 	remote: UninitializedRemote,
@@ -57,7 +56,6 @@ impl<M: core::Metadata, S: core::Middleware<M>> ServerBuilder<M, S> {
 			handler: Arc::new(handler.into()),
 			meta_extractor: Arc::new(NoopExtractor),
 			allowed_origins: None,
-			allowed_hosts: None,
 			request_middleware: None,
 			session_stats: None,
 			remote: UninitializedRemote::Unspawned,
@@ -82,12 +80,6 @@ impl<M: core::Metadata, S: core::Middleware<M>> ServerBuilder<M, S> {
 		self
 	}
 
-	/// Allowed hosts.
-	pub fn allowed_hosts(mut self, allowed_hosts: DomainsValidation<Host>) -> Self {
-		self.allowed_hosts = allowed_hosts.into();
-		self
-	}
-
 	/// Session stats
 	pub fn session_stats<T: session::SessionStats>(mut self, stats: T) -> Self {
 		self.session_stats = Some(Arc::new(stats));
@@ -103,13 +95,12 @@ impl<M: core::Metadata, S: core::Middleware<M>> ServerBuilder<M, S> {
 
 	/// Starts a new `WebSocket` server in separate thread.
 	/// Returns a `Server` handle which closes the server when droped.
-	pub fn start(self, addr: &SocketAddr) -> Result<Server, Error> {
+	pub fn start(self, addr: &SocketAddr) -> Result<Server, ServerError> {
 		Server::start(
 			addr,
 			self.handler,
 			self.meta_extractor,
 			self.allowed_origins,
-			self.allowed_hosts,
 			self.request_middleware,
 			self.session_stats,
 			self.remote,
